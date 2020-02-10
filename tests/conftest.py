@@ -22,6 +22,7 @@ from pymongo import MongoClient
 
 from bigchaindb import ValidatorElection
 from bigchaindb.common import crypto
+from bigchaindb.common.transaction_mode_types import BROADCAST_TX_COMMIT
 from bigchaindb.tendermint_utils import key_from_base64
 from bigchaindb.backend import schema, query
 from bigchaindb.common.crypto import (key_pair_from_ed25519_key,
@@ -233,6 +234,12 @@ def merlin():
 
 
 @pytest.fixture
+def a():
+    from abci import types_v0_31_5
+    return types_v0_31_5
+
+
+@pytest.fixture
 def b():
     from bigchaindb import BigchainDB
     return BigchainDB()
@@ -272,7 +279,7 @@ def signed_create_tx(alice, create_tx):
 
 @pytest.fixture
 def posted_create_tx(b, signed_create_tx):
-    res = b.post_transaction(signed_create_tx, 'broadcast_tx_commit')
+    res = b.post_transaction(signed_create_tx, BROADCAST_TX_COMMIT)
     assert res.status_code == 200
     return signed_create_tx
 
@@ -415,7 +422,7 @@ def abci_http(_setup_database, _configure_bigchaindb, abci_server,
             requests.get(uri)
             return True
 
-        except requests.exceptions.RequestException as e:
+        except requests.exceptions.RequestException:
             pass
         time.sleep(1)
 
@@ -433,11 +440,12 @@ def event_loop():
 
 @pytest.fixture(scope='session')
 def abci_server():
-    from abci import ABCIServer
+    from abci.server import ABCIServer
+    from abci import types_v0_31_5
     from bigchaindb.core import App
     from bigchaindb.utils import Process
 
-    app = ABCIServer(app=App())
+    app = ABCIServer(app=App(types_v0_31_5))
     abci_proxy = Process(name='ABCI', target=app.run)
     yield abci_proxy.start()
     abci_proxy.terminate()
@@ -712,12 +720,13 @@ def valid_upsert_validator_election_2(b_mock, node_key, new_validator):
 def ongoing_validator_election(b, valid_upsert_validator_election, ed25519_node_keys):
     validators = b.get_validators(height=1)
     genesis_validators = {'validators': validators,
-                          'height': 0,
-                          'election_id': None}
+                          'height': 0}
     query.store_validator_set(b.connection, genesis_validators)
-
     b.store_bulk_transactions([valid_upsert_validator_election])
-    block_1 = Block(app_hash='hash_1', height=1, transactions=[valid_upsert_validator_election.id])
+    query.store_election(b.connection, valid_upsert_validator_election.id, 1,
+                         is_concluded=False)
+    block_1 = Block(app_hash='hash_1', height=1,
+                    transactions=[valid_upsert_validator_election.id])
     b.store_block(block_1._asdict())
     return valid_upsert_validator_election
 

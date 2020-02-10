@@ -1,7 +1,7 @@
-FROM alpine:latest
-LABEL maintainer "dev@bigchaindb.com"
+FROM alpine:3.9
+LABEL maintainer "devs@bigchaindb.com"
 
-ARG TM_VERSION=0.22.8
+ARG TM_VERSION=v0.31.5
 RUN mkdir -p /usr/src/app
 ENV HOME /root
 COPY . /usr/src/app/
@@ -13,7 +13,7 @@ RUN apk --update add sudo bash \
         libffi-dev openssl-dev build-base jq \
     && apk add --no-cache libstdc++ dpkg gnupg \
     && pip3 install --upgrade pip cffi \
-    && pip install --no-cache-dir --process-dependency-links -e . \
+    && pip install -e . \
     && apk del build-dependencies \
     && rm -f /var/cache/apk/*
 

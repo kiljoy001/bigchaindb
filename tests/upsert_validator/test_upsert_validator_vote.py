@@ -11,6 +11,7 @@ from bigchaindb.upsert_validator import ValidatorElection
 from bigchaindb.common.exceptions import AmountError
 from bigchaindb.common.crypto import generate_key_pair
 from bigchaindb.common.exceptions import ValidationError
+from bigchaindb.common.transaction_mode_types import BROADCAST_TX_COMMIT
 from bigchaindb.elections.vote import Vote
 from tests.utils import generate_block, gen_vote
 
@@ -241,13 +242,13 @@ def test_upsert_validator(b, node_key, node_keys, ed25519_node_keys):
     election = ValidatorElection.generate([node_key.public_key],
                                           voters,
                                           new_validator, None).sign([node_key.private_key])
-    code, message = b.write_transaction(election, 'broadcast_tx_commit')
+    code, message = b.write_transaction(election, BROADCAST_TX_COMMIT)
     assert code == 202
     assert b.get_transaction(election.id)
 
     tx_vote = gen_vote(election, 0, ed25519_node_keys)
     assert tx_vote.validate(b)
-    code, message = b.write_transaction(tx_vote, 'broadcast_tx_commit')
+    code, message = b.write_transaction(tx_vote, BROADCAST_TX_COMMIT)
     assert code == 202
 
     resp = b.get_validators()
@@ -289,10 +290,10 @@ def test_get_validator_update(b, node_keys, node_key, ed25519_node_keys):
     assert not election.has_concluded(b, [tx_vote0, tx_vote1])
     assert election.has_concluded(b, [tx_vote0, tx_vote1, tx_vote2])
 
-    assert Election.approved_elections(b, 4, [tx_vote0]) == []
-    assert Election.approved_elections(b, 4, [tx_vote0, tx_vote1]) == []
+    assert Election.process_block(b, 4, [tx_vote0]) == []
+    assert Election.process_block(b, 4, [tx_vote0, tx_vote1]) == []
 
-    update = Election.approved_elections(b, 4, [tx_vote0, tx_vote1, tx_vote2])
+    update = Election.process_block(b, 4, [tx_vote0, tx_vote1, tx_vote2])
     assert len(update) == 1
     update_public_key = codecs.encode(update[0].pub_key.data, 'base64').decode().rstrip('\n')
     assert update_public_key == public_key64
@@ -315,7 +316,7 @@ def test_get_validator_update(b, node_keys, node_key, ed25519_node_keys):
 
     b.store_bulk_transactions([tx_vote0, tx_vote1])
 
-    update = Election.approved_elections(b, 9, [tx_vote2])
+    update = Election.process_block(b, 9, [tx_vote2])
     assert len(update) == 1
     update_public_key = codecs.encode(update[0].pub_key.data, 'base64').decode().rstrip('\n')
     assert update_public_key == public_key64

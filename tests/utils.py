@@ -11,6 +11,7 @@ from functools import singledispatch
 from bigchaindb.backend.localmongodb.connection import LocalMongoDBConnection
 from bigchaindb.backend.schema import TABLES
 from bigchaindb.common import crypto
+from bigchaindb.common.transaction_mode_types import BROADCAST_TX_COMMIT
 from bigchaindb.elections.election import Election, Vote
 from bigchaindb.tendermint_utils import key_to_base64
 
@@ -36,7 +37,7 @@ def generate_block(bigchain):
                             asset=None)\
                     .sign([alice.private_key])
 
-    code, message = bigchain.write_transaction(tx, 'broadcast_tx_commit')
+    code, message = bigchain.write_transaction(tx, BROADCAST_TX_COMMIT)
     assert code == 202
 
 
@@ -96,7 +97,7 @@ def generate_validators(powers):
     return validators
 
 
-def generate_election(b, cls, public_key, private_key, asset_data):
+def generate_election(b, cls, public_key, private_key, asset_data, voter_keys):
     voters = cls.recipients(b)
     election = cls.generate([public_key],
                             voters,
@@ -106,5 +107,7 @@ def generate_election(b, cls, public_key, private_key, asset_data):
     votes = [Vote.generate([election.to_inputs()[i]],
                            [([Election.to_public_key(election.id)], power)],
                            election.id) for i, (_, power) in enumerate(voters)]
+    for key, v in zip(voter_keys, votes):
+        v.sign([key])
 
     return election, votes

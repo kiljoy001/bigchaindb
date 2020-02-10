@@ -9,6 +9,7 @@ MongoDB.
 import logging
 from collections import namedtuple
 from uuid import uuid4
+
 import rapidjson
 
 try:
@@ -25,9 +26,12 @@ from bigchaindb.models import Transaction
 from bigchaindb.common.exceptions import (SchemaValidationError,
                                           ValidationError,
                                           DoubleSpend)
+from bigchaindb.common.transaction_mode_types import (BROADCAST_TX_COMMIT,
+                                                      BROADCAST_TX_ASYNC,
+                                                      BROADCAST_TX_SYNC)
 from bigchaindb.tendermint_utils import encode_transaction, merkleroot
 from bigchaindb import exceptions as core_exceptions
-from bigchaindb.consensus import BaseConsensusRules
+from bigchaindb.validation import BaseValidationRules
 
 
 logger = logging.getLogger(__name__)
@@ -56,20 +60,20 @@ class BigchainDB(object):
                 A connection to the database.
         """
         config_utils.autoconfigure()
-        self.mode_commit = 'broadcast_tx_commit'
-        self.mode_list = ('broadcast_tx_async',
-                          'broadcast_tx_sync',
+        self.mode_commit = BROADCAST_TX_COMMIT
+        self.mode_list = (BROADCAST_TX_ASYNC,
+                          BROADCAST_TX_SYNC,
                           self.mode_commit)
         self.tendermint_host = bigchaindb.config['tendermint']['host']
         self.tendermint_port = bigchaindb.config['tendermint']['port']
         self.endpoint = 'http://{}:{}/'.format(self.tendermint_host, self.tendermint_port)
 
-        consensusPlugin = bigchaindb.config.get('consensus_plugin')
+        validationPlugin = bigchaindb.config.get('validation_plugin')
 
-        if consensusPlugin:
-            self.consensus = config_utils.load_consensus_plugin(consensusPlugin)
+        if validationPlugin:
+            self.validation = config_utils.load_validation_plugin(validationPlugin)
         else:
-            self.consensus = BaseConsensusRules
+            self.validation = BaseValidationRules
 
         self.connection = connection if connection else backend.connect(**bigchaindb.config['database'])
 
@@ -142,6 +146,9 @@ class BigchainDB(object):
         if assets:
             backend.query.store_assets(self.connection, assets)
         return backend.query.store_transactions(self.connection, txns)
+
+    def delete_transactions(self, txs):
+        return backend.query.delete_transactions(self.connection, txs)
 
     def update_utxoset(self, transaction):
         """Update the UTXO set given ``transaction``. That is, remove
@@ -251,11 +258,14 @@ class BigchainDB(object):
 
         return transaction
 
-    def get_transactions_filtered(self, asset_id, operation=None):
+    def get_transactions(self, txn_ids):
+        return backend.query.get_transactions(self.connection, txn_ids)
+
+    def get_transactions_filtered(self, asset_id, operation=None, last_tx=None):
         """Get a list of transactions filtered on some criteria
         """
         txids = backend.query.get_txids_filtered(self.connection, asset_id,
-                                                 operation)
+                                                 operation, last_tx)
         for txid in txids:
             yield self.get_transaction(txid)
 
@@ -436,8 +446,10 @@ class BigchainDB(object):
         return [] if result is None else result['validators']
 
     def get_election(self, election_id):
-        result = backend.query.get_election(self.connection, election_id)
-        return result
+        return backend.query.get_election(self.connection, election_id)
+
+    def get_pre_commit_state(self):
+        return backend.query.get_pre_commit_state(self.connection)
 
     def store_pre_commit_state(self, state):
         return backend.query.store_pre_commit_state(self.connection, state)
@@ -450,9 +462,15 @@ class BigchainDB(object):
         return backend.query.store_validator_set(self.connection, {'height': height,
                                                                    'validators': validators})
 
+    def delete_validator_set(self, height):
+        return backend.query.delete_validator_set(self.connection, height)
+
     def store_abci_chain(self, height, chain_id, is_synced=True):
         return backend.query.store_abci_chain(self.connection, height,
                                               chain_id, is_synced)
+
+    def delete_abci_chain(self, height):
+        return backend.query.delete_abci_chain(self.connection, height)
 
     def get_latest_abci_chain(self):
         return backend.query.get_latest_abci_chain(self.connection)
@@ -481,15 +499,15 @@ class BigchainDB(object):
 
         self.store_abci_chain(block['height'] + 1, new_chain_id, False)
 
-    def store_election_results(self, height, election):
-        """Store election results
-        :param height: the block height at which the election concluded
-        :param election: a concluded election
-        """
-        return backend.query.store_election_results(self.connection, {'height': height,
-                                                                      'election_id': election.id})
+    def store_election(self, election_id, height, is_concluded):
+        return backend.query.store_election(self.connection, election_id,
+                                            height, is_concluded)
+
+    def store_elections(self, elections):
+        return backend.query.store_elections(self.connection, elections)
+
+    def delete_elections(self, height):
+        return backend.query.delete_elections(self.connection, height)
 
 
 Block = namedtuple('Block', ('app_hash', 'height', 'transactions'))
-
-PreCommitState = namedtuple('PreCommitState', ('commit_id', 'height', 'transactions'))

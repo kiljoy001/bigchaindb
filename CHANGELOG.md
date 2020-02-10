@@ -24,6 +24,66 @@ For reference, the possible headings are:
 * **Known Issues**
 * **Notes**
 
+## [2.0] - 2019-09-26
+
+### Changed
+
+Migrated from Tendermint 0.22.8 to 0.31.5.
+
+## [2.0 Beta 9] - 2018-11-27
+
+### Changed
+
+Removed support for TLSv1 and TLSv1.1 in all NGINX config files. Kept support for TLSv1.2 and added support for TLSv1.3. [Pull Request #2601](https://github.com/bigchaindb/bigchaindb/pull/2601)
+
+### Fixed
+
+Fixed two issues with schema validation. Pull requests [#2606](https://github.com/bigchaindb/bigchaindb/pull/2606) & [#2607](https://github.com/bigchaindb/bigchaindb/pull/2607)
+
+### External Contributors
+
+[@gamjapark](https://github.com/gamjapark) and team translated all the [BigchainDB root docs](https://docs.bigchaindb.com/en/latest/korean/index.html) into Korean. [Pull Request #2603](https://github.com/bigchaindb/bigchaindb/pull/2603)
+
+## [2.0 Beta 8] - 2018-11-03
+
+### Changed
+
+* Revised the [Simple Deployment Template](http://docs.bigchaindb.com/projects/server/en/latest/simple-deployment-template/index.html) in the docs. Added NGINX to the mix. Pull Requests [#2578](https://github.com/bigchaindb/bigchaindb/pull/2578) and [#2579](https://github.com/bigchaindb/bigchaindb/pull/2579)
+* Revised `nginx/nginx.conf` to enable CORS. [Pull Request #2580](https://github.com/bigchaindb/bigchaindb/pull/2580)
+
+### Fixed
+
+* Fixed a typo in the Kubernetes ConfigMap template. [Pull Request #2583](https://github.com/bigchaindb/bigchaindb/pull/2583)
+
+### External Contributors
+
+[@gamjapark](https://github.com/gamjapark) translated the main `README.md` file into Korean. [Pull Request #2592](https://github.com/bigchaindb/bigchaindb/pull/2592)
+
+## [2.0 Beta 7] - 2018-09-28
+
+Tag name: v2.0.0b7
+
+### Added
+
+Completed the implementation of chain-migration elections (BEP-42). Pull requests [#2553](https://github.com/bigchaindb/bigchaindb/pull/2553), [#2556](https://github.com/bigchaindb/bigchaindb/pull/2556), [#2558](https://github.com/bigchaindb/bigchaindb/pull/2558), [#2563](https://github.com/bigchaindb/bigchaindb/pull/2563) and [#2566](https://github.com/bigchaindb/bigchaindb/pull/2566)
+
+### Changed
+
+* Code that used the Python driver's (deprecated) transactions.send() method now uses its transactions.send_commit() method instead. [Pull request #2547](https://github.com/bigchaindb/bigchaindb/pull/2547)
+* Code that implied pluggable "consensus" now implies pluggable transaction "validation" (a more accurate word). [Pull request #2561](https://github.com/bigchaindb/bigchaindb/pull/2561)
+
+### Removed
+
+Benchmark logs. [Pull request #2565](https://github.com/bigchaindb/bigchaindb/pull/2565)
+
+### Fixed
+
+A bug caused by an incorrect MongoDB query. [Pull request #2567](https://github.com/bigchaindb/bigchaindb/pull/2567)
+
+### Notes
+
+There's now better documentation about logs, log rotation, and the `server.bind` config setting. Pull requests [#2546](https://github.com/bigchaindb/bigchaindb/pull/2546) and [#2575](https://github.com/bigchaindb/bigchaindb/pull/2575)
+
 ## [2.0 Beta 6] - 2018-09-17
 
 Tag name: v2.0.0b6

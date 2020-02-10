@@ -13,8 +13,10 @@ import copy
 import json
 import sys
 
+from bigchaindb.core import rollback
 from bigchaindb.migrations.chain_migration_election import ChainMigrationElection
 from bigchaindb.utils import load_node_key
+from bigchaindb.common.transaction_mode_types import BROADCAST_TX_COMMIT
 from bigchaindb.common.exceptions import (DatabaseDoesNotExist,
                                           ValidationError)
 from bigchaindb.elections.vote import Vote
@@ -22,8 +24,6 @@ import bigchaindb
 from bigchaindb import (backend, ValidatorElection,
                         BigchainDB)
 from bigchaindb.backend import schema
-from bigchaindb.backend import query
-from bigchaindb.backend.query import PRE_COMMIT_ID
 from bigchaindb.commands import utils
 from bigchaindb.commands.utils import (configure_bigchaindb,
                                        input_on_stderr)
@@ -118,7 +118,6 @@ def run_election_new(args, bigchain):
 
 
 def create_new_election(sk, bigchain, election_class, data):
-
     try:
         key = load_node_key(sk)
         voters = election_class.recipients(bigchain)
@@ -133,7 +132,7 @@ def create_new_election(sk, bigchain, election_class, data):
         logger.error(fd_404)
         return False
 
-    resp = bigchain.write_transaction(election, 'broadcast_tx_commit')
+    resp = bigchain.write_transaction(election, BROADCAST_TX_COMMIT)
     if resp == (202, ''):
         logger.info('[SUCCESS] Submitted proposal with id: {}'.format(election.id))
         return election.id
@@ -208,7 +207,7 @@ def run_election_approve(args, bigchain):
                              tx.id).sign([key.private_key])
     approval.validate(bigchain)
 
-    resp = bigchain.write_transaction(approval, 'broadcast_tx_commit')
+    resp = bigchain.write_transaction(approval, BROADCAST_TX_COMMIT)
 
     if resp == (202, ''):
         logger.info('[SUCCESS] Your vote has been submitted')
@@ -263,7 +262,6 @@ def run_drop(args):
             return
 
     conn = backend.connect()
-    dbname = bigchaindb.config['database']['name']
     try:
         schema.drop_database(conn, dbname)
     except DatabaseDoesNotExist:
@@ -271,16 +269,7 @@ def run_drop(args):
 
 
 def run_recover(b):
-    pre_commit = query.get_pre_commit_state(b.connection, PRE_COMMIT_ID)
-
-    # Initially the pre-commit collection would be empty
-    if pre_commit:
-        latest_block = query.get_latest_block(b.connection)
-
-        # NOTE: the pre-commit state can only be ahead of the commited state
-        # by 1 block
-        if latest_block and (latest_block['height'] < pre_commit['height']):
-            query.delete_transactions(b.connection, pre_commit['transactions'])
+    rollback(b)
 
 
 @configure_bigchaindb
@@ -362,6 +351,7 @@ def create_parser():
                                          help='The election_id of the election.')
     approve_election_parser.add_argument('--private-key',
                                          dest='sk',
+                                         required=True,
                                          help='Path to the private key of the election initiator.')
 
     show_election_parser = election_subparser.add_parser('show',

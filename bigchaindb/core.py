@@ -9,15 +9,7 @@ import logging
 import sys
 
 from abci.application import BaseApplication
-from abci.types_pb2 import (
-    ResponseInitChain,
-    ResponseInfo,
-    ResponseCheckTx,
-    ResponseBeginBlock,
-    ResponseDeliverTx,
-    ResponseEndBlock,
-    ResponseCommit,
-)
+from abci import CodeTypeOk
 
 from bigchaindb import BigchainDB
 from bigchaindb.elections.election import Election
@@ -25,13 +17,11 @@ from bigchaindb.version import __tm_supported_versions__
 from bigchaindb.utils import tendermint_version_is_compatible
 from bigchaindb.tendermint_utils import (decode_transaction,
                                          calculate_hash)
-from bigchaindb.lib import Block, PreCommitState
-from bigchaindb.backend.query import PRE_COMMIT_ID
+from bigchaindb.lib import Block
 import bigchaindb.upsert_validator.validator_utils as vutils
 from bigchaindb.events import EventTypes, Event
 
 
-CodeTypeOk = 0
 CodeTypeError = 1
 logger = logging.getLogger(__name__)
 
@@ -40,11 +30,11 @@ class App(BaseApplication):
     """Bridge between BigchainDB and Tendermint.
 
     The role of this class is to expose the BigchainDB
-    transactional logic to the Tendermint Consensus
-    State Machine.
+    transaction logic to Tendermint Core.
     """
 
-    def __init__(self, bigchaindb=None, events_queue=None):
+    def __init__(self, abci, bigchaindb=None, events_queue=None,):
+        super().__init__(abci)
         self.events_queue = events_queue
         self.bigchaindb = bigchaindb or BigchainDB()
         self.block_txn_ids = []
@@ -110,7 +100,7 @@ class App(BaseApplication):
                                          genesis.chain_id, True)
         self.chain = {'height': abci_chain_height, 'is_synced': True,
                       'chain_id': genesis.chain_id}
-        return ResponseInitChain()
+        return self.abci.ResponseInitChain()
 
     def info(self, request):
         """Return height of the latest committed block."""
@@ -125,7 +115,7 @@ class App(BaseApplication):
 
         logger.info(f"Tendermint version: {request.version}")
 
-        r = ResponseInfo()
+        r = self.abci.ResponseInfo()
         block = self.bigchaindb.get_latest_block()
         if block:
             chain_shift = 0 if self.chain is None else self.chain['height']
@@ -150,10 +140,10 @@ class App(BaseApplication):
         transaction = decode_transaction(raw_transaction)
         if self.bigchaindb.is_valid_transaction(transaction):
             logger.debug('check_tx: VALID')
-            return ResponseCheckTx(code=CodeTypeOk)
+            return self.abci.ResponseCheckTx(code=CodeTypeOk)
         else:
             logger.debug('check_tx: INVALID')
-            return ResponseCheckTx(code=CodeTypeError)
+            return self.abci.ResponseCheckTx(code=CodeTypeError)
 
     def begin_block(self, req_begin_block):
         """Initialize list of transaction.
@@ -170,7 +160,7 @@ class App(BaseApplication):
 
         self.block_txn_ids = []
         self.block_transactions = []
-        return ResponseBeginBlock()
+        return self.abci.ResponseBeginBlock()
 
     def deliver_tx(self, raw_transaction):
         """Validate the transaction before mutating the state.
@@ -187,12 +177,12 @@ class App(BaseApplication):
 
         if not transaction:
             logger.debug('deliver_tx: INVALID')
-            return ResponseDeliverTx(code=CodeTypeError)
+            return self.abci.ResponseDeliverTx(code=CodeTypeError)
         else:
             logger.debug('storing tx')
             self.block_txn_ids.append(transaction.id)
             self.block_transactions.append(transaction)
-            return ResponseDeliverTx(code=CodeTypeOk)
+            return self.abci.ResponseDeliverTx(code=CodeTypeOk)
 
     def end_block(self, request_end_block):
         """Calculate block hash using transaction ids and previous block
@@ -208,6 +198,14 @@ class App(BaseApplication):
 
         height = request_end_block.height + chain_shift
         self.new_height = height
+
+        # store pre-commit state to recover in case there is a crash during
+        # `end_block` or `commit`
+        logger.debug(f'Updating pre-commit state: {self.new_height}')
+        pre_commit_state = dict(height=self.new_height,
+                                transactions=self.block_txn_ids)
+        self.bigchaindb.store_pre_commit_state(pre_commit_state)
+
         block_txn_hash = calculate_hash(self.block_txn_ids)
         block = self.bigchaindb.get_latest_block()
 
@@ -216,18 +214,11 @@ class App(BaseApplication):
         else:
             self.block_txn_hash = block['app_hash']
 
-        # Process all concluded elections in the current block and get any update to the validator set
-        update = Election.approved_elections(self.bigchaindb,
-                                             self.new_height,
-                                             self.block_transactions)
+        validator_update = Election.process_block(self.bigchaindb,
+                                                  self.new_height,
+                                                  self.block_transactions)
 
-        # Store pre-commit state to recover in case there is a crash  during `commit`
-        pre_commit_state = PreCommitState(commit_id=PRE_COMMIT_ID,
-                                          height=self.new_height,
-                                          transactions=self.block_txn_ids)
-        logger.debug('Updating PreCommitState: %s', self.new_height)
-        self.bigchaindb.store_pre_commit_state(pre_commit_state._asdict())
-        return ResponseEndBlock(validator_updates=update)
+        return self.abci.ResponseEndBlock(validator_updates=validator_update)
 
     def commit(self):
         """Store the new height and along with block hash."""
@@ -258,4 +249,22 @@ class App(BaseApplication):
             })
             self.events_queue.put(event)
 
-        return ResponseCommit(data=data)
+        return self.abci.ResponseCommit(data=data)
+
+
+def rollback(b):
+    pre_commit = b.get_pre_commit_state()
+
+    if pre_commit is None:
+        # the pre_commit record is first stored in the first `end_block`
+        return
+
+    latest_block = b.get_latest_block()
+    if latest_block is None:
+        logger.error('Found precommit state but no blocks!')
+        sys.exit(1)
+
+    # NOTE: the pre-commit state is always at most 1 block ahead of the commited state
+    if latest_block['height'] < pre_commit['height']:
+        Election.rollback(b, pre_commit['height'], pre_commit['transactions'])
+        b.delete_transactions(pre_commit['transactions'])
